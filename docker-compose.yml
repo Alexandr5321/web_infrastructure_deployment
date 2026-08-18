@@ -1,0 +1,27 @@
+services:
+
+  apache:
+    build: ./apache
+    container_name: apache
+    expose:
+      - "80"
+    networks:
+      - backend
+
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_DB: app_db
+      POSTGRES_USER: app_user
+      POSTGRES_PASSWORD: app_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+
+networks:
+  backend:
+
+volumes:
+  postgres_data:

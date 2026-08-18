@@ -9,7 +9,7 @@ on:
   pull_request:
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository }}/apache
+  IMAGE_NAME: ghcr.io/alexandr5321/web_infrastructure_deployment/apache
 
 jobs:
   validate:

@@ -1,3 +1,4 @@
+```yaml
 name: CI
 
 on:
@@ -23,8 +24,22 @@ jobs:
         run: docker compose build apache
 
       - name: Start services
-        run: docker compose up -d
+        run: docker compose up -d || true
+
+      - name: Show container status
+        if: always()
+        run: docker compose ps
 
       - name: Show PostgreSQL logs
         if: always()
         run: docker compose logs postgres
+
+      - name: Show Apache logs
+        if: always()
+        run: docker compose logs apache
+
+      - name: Show Nginx logs
+        if: always()
+        run: docker compose logs nginx
+```
+

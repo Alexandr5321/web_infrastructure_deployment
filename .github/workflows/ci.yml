@@ -1,3 +1,4 @@
+```yaml
 name: CI
 
 on:
@@ -8,9 +9,16 @@ on:
       - master
   pull_request:
 
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}/apache
+
 jobs:
   validate:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout repository
@@ -23,22 +31,35 @@ jobs:
         run: docker compose build apache
 
       - name: Start services
-        run: docker compose up -d || true
+        run: docker compose up -d
+
+      - name: Wait for services
+        run: sleep 30
 
       - name: Show container status
-        if: always()
         run: docker compose ps
 
-      - name: Show PostgreSQL logs
-        if: always()
-        run: docker compose logs postgres
+      - name: Check service health
+        run: |
+          docker inspect --format='{{.Name}} → {{.State.Health.Status}}' \
+            postgres apache nginx
 
-      - name: Show Apache logs
-        if: always()
-        run: docker compose logs apache
+      - name: Login to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Show Nginx logs
-        if: always()
-        run: docker compose logs nginx
-
+      - name: Build and push Apache image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./apache
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:develop
+```
 

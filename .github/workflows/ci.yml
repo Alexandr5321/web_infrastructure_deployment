@@ -1,4 +1,3 @@
-```yaml
 name: CI
 
 on:
@@ -61,5 +60,3 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
             ${{ env.IMAGE_NAME }}:develop
-```
-

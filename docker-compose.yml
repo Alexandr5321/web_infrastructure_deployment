@@ -3,16 +3,48 @@ services:
   nginx:
     image: nginx:alpine
     container_name: nginx
+
     ports:
       - "80:80"
+      - "443:443"
+
+    depends_on:
+      apache:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --no-check-certificate --tries=1 --spider https://127.0.0.1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:roi
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+
     networks:
       - frontend
 
   apache:
     build: ./apache
     container_name: apache
+
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
     expose:
       - "80"
     networks:
@@ -22,10 +54,18 @@ services:
   postgres:
     image: postgres:16
     container_name: postgres
+    
     environment:
-      POSTGRES_DB: app_db
-      POSTGRES_USER: app_user
-      POSTGRES_PASSWORD: app_password
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro

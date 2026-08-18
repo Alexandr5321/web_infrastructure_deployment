@@ -1,9 +1,9 @@
 <?php
 
-$host = 'postgres';
-$db = 'app_db';
-$user = 'app_user';
-$password = 'app_password';
+$host = getenv('POSTGRES_HOST') ?: 'postgres';
+$db = getenv('POSTGRES_DB');
+$user = getenv('POSTGRES_USER');
+$password = getenv('POSTGRES_PASSWORD');
 
 try {
     $pdo = new PDO(

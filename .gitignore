@@ -1,1 +1,3 @@
 nginx/ssl/*.pem
+.env
+backups/

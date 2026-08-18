@@ -23,56 +23,53 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Проверяем, что docker-compose.yml корректный
       - name: Validate Docker Compose
         run: docker compose config
 
-      # Собираем Apache image
       - name: Build Apache image
         run: docker compose build apache
 
-      # Запускаем Compose.
-      # Временно разрешаем ошибку, чтобы получить логи PostgreSQL.
-      - name: Start services
-        run: docker compose up -d || true
+      - name: Start PostgreSQL and Apache
+        run: docker compose up -d postgres apache
 
-      # Показываем состояние всех контейнеров
-      - name: Show container status
-        if: always()
-        run: docker compose ps -a
-
-      # Показываем PostgreSQL logs
-      - name: Show PostgreSQL logs
-        if: always()
-        run: docker compose logs postgres
-
-      # Показываем Apache logs
-      - name: Show Apache logs
-        if: always()
-        run: docker compose logs apache
-
-      # Показываем Nginx logs
-      - name: Show Nginx logs
-        if: always()
-        run: docker compose logs nginx
-
-      # Показываем Docker networks
-      - name: Show Docker networks
-        if: always()
-        run: docker network ls
-
-      # Показываем health status контейнеров
-      - name: Show health status
-        if: always()
+      - name: Wait for services
         run: |
-          for container in postgres apache nginx; do
-            echo "===== $container ====="
-            docker inspect "$container" \
-              --format='{{.Name}} → {{if .State.Health}}{{.State.Health.Status}}{{else}}no healthcheck{{end}}' \
-              2>/dev/null || true
+          echo "Waiting for PostgreSQL and Apache..."
+
+          for i in {1..30}; do
+            POSTGRES_STATUS=$(docker inspect postgres \
+              --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+              2>/dev/null || echo "missing")
+
+            APACHE_STATUS=$(docker inspect apache \
+              --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+              2>/dev/null || echo "missing")
+
+            echo "PostgreSQL: $POSTGRES_STATUS"
+            echo "Apache:     $APACHE_STATUS"
+
+            if [ "$POSTGRES_STATUS" = "healthy" ] && [ "$APACHE_STATUS" = "healthy" ]; then
+              echo "All services are healthy."
+              exit 0
+            fi
+
+            sleep 2
           done
 
-      # Логинимся в GitHub Container Registry
+          echo "Services did not become healthy."
+          exit 1
+
+      - name: Show container status
+        run: docker compose ps
+
+      - name: Show PostgreSQL logs
+        if: failure()
+        run: docker compose logs postgres
+
+      - name: Show Apache logs
+        if: failure()
+        run: docker compose logs apache
+
       - name: Login to GHCR
         if: github.event_name == 'push'
         uses: docker/login-action@v3
@@ -81,9 +78,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Пока до GHCR не доходим, если Compose сломан.
-      # Этот шаг нужен для проверки сборки Apache image.
-      - name: Build Apache Docker image
+      - name: Build and push Apache image
         if: github.event_name == 'push'
         uses: docker/build-push-action@v6
         with:
@@ -92,4 +87,3 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
             ${{ env.IMAGE_NAME }}:develop
-

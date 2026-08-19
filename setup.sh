@@ -2,44 +2,46 @@
 
 set -euo pipefail
 
-# ============================================================
-# Configuration
-# ============================================================
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ADMIN_USER="admin-user"
 DEPLOY_USER="deploy-user"
 
-# Перед запуском:
-# export ADMIN_PUBLIC_KEY="ssh-ed25519 AAAA..."
-# export DEPLOY_PUBLIC_KEY="ssh-ed25519 AAAA..."
+echo "========================================"
+echo " Web infrastructure deployment"
+echo "========================================"
 
-if [[ -z "${ADMIN_PUBLIC_KEY:-}" ]]; then
-    echo "ERROR: ADMIN_PUBLIC_KEY is not set"
-    echo 'Example: export ADMIN_PUBLIC_KEY="ssh-ed25519 AAAA..."'
+if [ "$EUID" -ne 0 ]; then
+    echo "ERROR: run this script with sudo:"
+    echo "  sudo ./setup.sh"
     exit 1
 fi
 
-if [[ -z "${DEPLOY_PUBLIC_KEY:-}" ]]; then
-    echo "ERROR: DEPLOY_PUBLIC_KEY is not set"
-    echo 'Example: export DEPLOY_PUBLIC_KEY="ssh-ed25519 AAAA..."'
-    exit 1
-fi
+cd "$PROJECT_DIR"
 
-# ============================================================
-# Root check
-# ============================================================
+# --------------------------------------------------
+# 1. Install required packages
+# --------------------------------------------------
 
-if [[ "$EUID" -ne 0 ]]; then
-    echo "ERROR: run this script with sudo"
-    echo "Example: sudo ./setup.sh"
-    exit 1
-fi
+echo
+echo "[1/7] Installing required packages..."
 
-echo "=== Creating users ==="
+apt-get update
+apt-get install -y \
+    docker.io \
+    docker-compose-v2 \
+    openssh-server \
+    ufw
 
-# ============================================================
-# Users
-# ============================================================
+systemctl enable --now docker
+systemctl enable --now ssh
+
+# --------------------------------------------------
+# 2. Create users
+# --------------------------------------------------
+
+echo
+echo "[2/7] Creating users..."
 
 if ! id "$ADMIN_USER" >/dev/null 2>&1; then
     useradd -m -s /bin/bash "$ADMIN_USER"
@@ -49,155 +51,172 @@ if ! id "$DEPLOY_USER" >/dev/null 2>&1; then
     useradd -m -s /bin/bash "$DEPLOY_USER"
 fi
 
-# admin-user gets sudo access
-usermod -aG sudo "$ADMIN_USER"
+# --------------------------------------------------
+# 3. Generate SSH keys
+# --------------------------------------------------
 
-# ============================================================
-# SSH directories
-# ============================================================
+echo
+echo "[3/7] Generating SSH keys..."
 
-echo "=== Configuring SSH keys ==="
+install -d -m 700 /root/.ssh
+
+if [ ! -f /root/.ssh/admin_user_ed25519 ]; then
+    ssh-keygen \
+        -t ed25519 \
+        -f /root/.ssh/admin_user_ed25519 \
+        -N "" \
+        -C "admin-user"
+fi
+
+if [ ! -f /root/.ssh/deploy_user_ed25519 ]; then
+    ssh-keygen \
+        -t ed25519 \
+        -f /root/.ssh/deploy_user_ed25519 \
+        -N "" \
+        -C "deploy-user"
+fi
+
+# --------------------------------------------------
+# 4. Configure authorized_keys
+# --------------------------------------------------
+
+echo
+echo "[4/7] Configuring SSH authorized keys..."
 
 for USER in "$ADMIN_USER" "$DEPLOY_USER"; do
-    HOME_DIR=$(getent passwd "$USER" | cut -d: -f6)
+    HOME_DIR="/home/$USER"
 
-    install -d -m 700 -o "$USER" -g "$USER" \
+    install -d \
+        -m 700 \
+        -o "$USER" \
+        -g "$USER" \
         "$HOME_DIR/.ssh"
-
-    touch "$HOME_DIR/.ssh/authorized_keys"
-
-    chown "$USER:$USER" "$HOME_DIR/.ssh/authorized_keys"
-    chmod 600 "$HOME_DIR/.ssh/authorized_keys"
 done
 
-# Install public keys
-echo "$ADMIN_PUBLIC_KEY" > \
+install \
+    -m 600 \
+    -o "$ADMIN_USER" \
+    -g "$ADMIN_USER" \
+    /root/.ssh/admin_user_ed25519.pub \
     "/home/$ADMIN_USER/.ssh/authorized_keys"
 
-echo "$DEPLOY_PUBLIC_KEY" > \
+install \
+    -m 600 \
+    -o "$DEPLOY_USER" \
+    -g "$DEPLOY_USER" \
+    /root/.ssh/deploy_user_ed25519.pub \
     "/home/$DEPLOY_USER/.ssh/authorized_keys"
 
-chown "$ADMIN_USER:$ADMIN_USER" \
-    "/home/$ADMIN_USER/.ssh/authorized_keys"
+# --------------------------------------------------
+# 5. Configure SSH security
+# --------------------------------------------------
 
-chown "$DEPLOY_USER:$DEPLOY_USER" \
-    "/home/$DEPLOY_USER/.ssh/authorized_keys"
+echo
+echo "[5/7] Configuring SSH security..."
 
-chmod 600 "/home/$ADMIN_USER/.ssh/authorized_keys"
-chmod 600 "/home/$DEPLOY_USER/.ssh/authorized_keys"
-
-# ============================================================
-# SSH configuration
-# ============================================================
-
-echo "=== Configuring SSH ==="
-
-SSHD_CONFIG="/etc/ssh/sshd_config"
-
-# Backup original configuration
-cp "$SSHD_CONFIG" "${SSHD_CONFIG}.backup"
-
-# Remove previous settings if they exist
-sed -i \
-    -e '/^[[:space:]]*PasswordAuthentication[[:space:]]/d' \
-    -e '/^[[:space:]]*PubkeyAuthentication[[:space:]]/d' \
-    -e '/^[[:space:]]*PermitRootLogin[[:space:]]/d' \
-    "$SSHD_CONFIG"
-
-cat >> "$SSHD_CONFIG" <<'EOF'
-
-# Managed by web infrastructure deployment
+cat > /etc/ssh/sshd_config.d/99-web-infrastructure.conf <<'EOF'
 PasswordAuthentication no
-PubkeyAuthentication yes
+KbdInteractiveAuthentication no
 PermitRootLogin no
+PubkeyAuthentication yes
 EOF
 
-# Validate SSH configuration BEFORE restart
 sshd -t
+systemctl restart ssh
 
-# ============================================================
-# Firewall
-# ============================================================
+# --------------------------------------------------
+# 6. Configure firewall
+# --------------------------------------------------
 
-echo "=== Configuring UFW ==="
+echo
+echo "[6/7] Configuring firewall..."
 
-apt-get update
-apt-get install -y ufw
+ufw --force reset
 
-# Default policy: deny everything incoming
 ufw default deny incoming
-
-# Allow outgoing traffic
 ufw default allow outgoing
 
 # SSH
 ufw allow 22/tcp
 
-# HTTP
+# Web
 ufw allow 80/tcp
-
-# HTTPS
 ufw allow 443/tcp
 
-# Enable firewall
 ufw --force enable
 
-# ============================================================
-# Restart SSH
-# ============================================================
+# --------------------------------------------------
+# 7. Configure environment and start containers
+# --------------------------------------------------
 
-echo "=== Restarting SSH ==="
+echo
+echo "[7/7] Starting Docker infrastructure..."
 
-if systemctl list-unit-files | grep -q '^ssh\.service'; then
-    systemctl restart ssh
+if [ ! -f "$PROJECT_DIR/.env" ]; then
+
+    POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+
+    cat > "$PROJECT_DIR/.env" <<EOF
+POSTGRES_DB=app_db
+POSTGRES_USER=app_user
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+REMOTE_SYSLOG_IP=syslog-receiver
+EOF
+
+    chmod 600 "$PROJECT_DIR/.env"
+
+    echo ".env created."
 else
-    systemctl restart sshd
+    echo ".env already exists."
 fi
 
-# ============================================================
-# Docker
-# ============================================================
+docker compose down --remove-orphans
 
-echo "=== Checking Docker ==="
+docker compose build
 
-if ! command -v docker >/dev/null 2>&1; then
-    echo "Docker is not installed."
-    echo "Please install Docker and Docker Compose first."
-    exit 1
-fi
-
-if ! docker compose version >/dev/null 2>&1; then
-    echo "Docker Compose plugin is not installed."
-    exit 1
-fi
-
-# ============================================================
-# Start infrastructure
-# ============================================================
-
-echo "=== Starting Docker infrastructure ==="
-
-cd "$(dirname "$0")"
-
-docker compose up -d --build
+docker compose up -d
 
 echo
-echo "============================================================"
-echo "Infrastructure started successfully."
-echo "============================================================"
-echo
+echo "Waiting for services..."
+
+sleep 10
 
 docker compose ps
 
+# --------------------------------------------------
+# Final checks
+# --------------------------------------------------
+
 echo
-echo "SSH:"
-echo "  Password authentication: disabled"
-echo "  Root login: disabled"
-echo "  Public-key authentication: enabled"
+echo "========================================"
+echo " Deployment completed"
+echo "========================================"
+
 echo
-echo "Users:"
+echo "HTTP/HTTPS:"
+echo "  https://localhost"
+
+echo
+echo "SSH users:"
 echo "  $ADMIN_USER"
 echo "  $DEPLOY_USER"
+
 echo
-echo "Firewall:"
-ufw status
+echo "Generated private keys:"
+echo "  /root/.ssh/admin_user_ed25519"
+echo "  /root/.ssh/deploy_user_ed25519"
+
+echo
+echo "Test HTTPS:"
+echo "  curl -k https://localhost"
+
+echo
+echo "Check containers:"
+echo "  docker compose ps"
+
+echo
+echo "Check remote syslog:"
+echo "  docker logs syslog-receiver --tail=20"
+
+echo
+echo "========================================"

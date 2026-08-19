@@ -25,6 +25,35 @@ services:
     networks:
       - frontend
 
+  rsyslog:
+    build: ./rsyslog
+    container_name: rsyslog
+
+    environment:
+      REMOTE_SYSLOG_IP: ${REMOTE_SYSLOG_IP}
+
+    volumes:
+      - rsyslog_queue:/var/spool/rsyslog
+      - rsyslog_logs:/var/log
+
+    depends_on:
+      syslog-receiver:
+        condition: service_started
+
+    networks:
+      - frontend
+
+
+  syslog-receiver:
+    build: ./syslog-receiver
+    container_name: syslog-receiver
+
+    expose:
+      - "514"
+
+    networks:
+      - frontend
+
   apache:
     build: ./apache
     container_name: apache
@@ -87,3 +116,5 @@ networks:
 
 volumes:
   postgres_data:
+  rsyslog_queue:
+  rsyslog_logs:

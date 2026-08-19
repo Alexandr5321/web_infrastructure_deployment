@@ -23,14 +23,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate Docker Compose
-        run: docker compose config
+      - name: Validate CI Compose
+        run: docker compose -f docker-compose.ci.yml config
 
       - name: Build Apache image
-        run: docker compose build apache
+        run: docker compose -f docker-compose.ci.yml build apache
 
-      - name: Start PostgreSQL and Apache
-        run: docker compose up -d postgres apache
+      - name: Start CI services
+        run: docker compose -f docker-compose.ci.yml up -d
 
       - name: Wait for services
         run: |
@@ -60,15 +60,18 @@ jobs:
           exit 1
 
       - name: Show container status
-        run: docker compose ps
+        run: docker compose -f docker-compose.ci.yml ps
 
-      - name: Show PostgreSQL logs
-        if: failure()
-        run: docker compose logs postgres
+      - name: Test Apache endpoint
+        run: docker exec apache curl -f http://localhost
 
-      - name: Show Apache logs
+      - name: Show PostgreSQL logs on failure
         if: failure()
-        run: docker compose logs apache
+        run: docker compose -f docker-compose.ci.yml logs postgres
+
+      - name: Show Apache logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.ci.yml logs apache
 
       - name: Login to GHCR
         if: github.event_name == 'push'
@@ -87,3 +90,7 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
             ${{ env.IMAGE_NAME }}:develop
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down -v

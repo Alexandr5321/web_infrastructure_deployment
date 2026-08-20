@@ -112,7 +112,16 @@ services:
 
 networks:
   backend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+
   frontend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.0.0/16
 
 volumes:
   postgres_data:

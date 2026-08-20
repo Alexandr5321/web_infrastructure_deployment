@@ -11,6 +11,8 @@ services:
     depends_on:
       apache:
         condition: service_healthy
+      rsyslog:
+        condition: service_started
 
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --no-check-certificate --tries=1 --spider https://127.0.0.1 || exit 1"]

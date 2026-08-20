@@ -24,13 +24,14 @@ cd "$PROJECT_DIR"
 # --------------------------------------------------
 
 echo
-echo "[1/7] Installing required packages..."
+echo "[1/8] Installing required packages..."
 
 apt-get update
 apt-get install -y \
     docker.io \
     docker-compose-v2 \
     openssh-server \
+    openssl \
     ufw
 
 systemctl enable --now docker
@@ -41,7 +42,7 @@ systemctl enable --now ssh
 # --------------------------------------------------
 
 echo
-echo "[2/7] Creating users..."
+echo "[2/8] Creating users..."
 
 if ! id "$ADMIN_USER" >/dev/null 2>&1; then
     useradd -m -s /bin/bash "$ADMIN_USER"
@@ -56,7 +57,7 @@ fi
 # --------------------------------------------------
 
 echo
-echo "[3/7] Generating SSH keys..."
+echo "[3/8] Generating SSH keys..."
 
 install -d -m 700 /root/.ssh
 
@@ -81,7 +82,7 @@ fi
 # --------------------------------------------------
 
 echo
-echo "[4/7] Configuring SSH authorized keys..."
+echo "[4/8] Configuring SSH authorized keys..."
 
 for USER in "$ADMIN_USER" "$DEPLOY_USER"; do
     HOME_DIR="/home/$USER"
@@ -112,7 +113,7 @@ install \
 # --------------------------------------------------
 
 echo
-echo "[5/7] Configuring SSH security..."
+echo "[5/8] Configuring SSH security..."
 
 cat > /etc/ssh/sshd_config.d/99-web-infrastructure.conf <<'EOF'
 PasswordAuthentication no
@@ -129,7 +130,7 @@ systemctl restart ssh
 # --------------------------------------------------
 
 echo
-echo "[6/7] Configuring firewall..."
+echo "[6/8] Configuring firewall..."
 
 ufw --force reset
 
@@ -146,12 +147,13 @@ ufw allow 443/tcp
 ufw --force enable
 
 # --------------------------------------------------
-# 7. Configure environment and start containers
+# 7. Configure environment and SSL certificates
 # --------------------------------------------------
 
 echo
-echo "[7/7] Starting Docker infrastructure..."
+echo "[7/8] Configuring environment and SSL certificates..."
 
+# Create .env if it doesn't exist
 if [ ! -f "$PROJECT_DIR/.env" ]; then
 
     POSTGRES_PASSWORD="$(openssl rand -hex 24)"
@@ -169,6 +171,38 @@ EOF
 else
     echo ".env already exists."
 fi
+
+# Create SSL directory
+mkdir -p "$PROJECT_DIR/nginx/ssl"
+
+# Generate self-signed certificate if it doesn't exist
+if [ ! -f "$PROJECT_DIR/nginx/ssl/fullchain.pem" ] || \
+   [ ! -f "$PROJECT_DIR/nginx/ssl/privkey.pem" ]; then
+
+    echo "Generating self-signed SSL certificate..."
+
+    openssl req -x509 \
+        -nodes \
+        -days 365 \
+        -newkey rsa:2048 \
+        -keyout "$PROJECT_DIR/nginx/ssl/privkey.pem" \
+        -out "$PROJECT_DIR/nginx/ssl/fullchain.pem" \
+        -subj "/C=GE/ST=Tbilisi/L=Tbilisi/O=WebInfrastructure/CN=localhost"
+
+    chmod 600 "$PROJECT_DIR/nginx/ssl/privkey.pem"
+    chmod 644 "$PROJECT_DIR/nginx/ssl/fullchain.pem"
+
+    echo "SSL certificate generated."
+else
+    echo "SSL certificates already exist."
+fi
+
+# --------------------------------------------------
+# 8. Start Docker infrastructure
+# --------------------------------------------------
+
+echo
+echo "[8/8] Starting Docker infrastructure..."
 
 docker compose down --remove-orphans
 
@@ -205,6 +239,11 @@ echo
 echo "Generated private keys:"
 echo "  /root/.ssh/admin_user_ed25519"
 echo "  /root/.ssh/deploy_user_ed25519"
+
+echo
+echo "SSL certificates:"
+echo "  $PROJECT_DIR/nginx/ssl/fullchain.pem"
+echo "  $PROJECT_DIR/nginx/ssl/privkey.pem"
 
 echo
 echo "Test HTTPS:"

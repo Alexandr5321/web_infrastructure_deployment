@@ -5,7 +5,7 @@
 ```bash
 git clone <REPOSITORY_URL>
 cd web_infrastructure_deployment
-sudo ./setup.sh
+sudo bash ./setup.sh
 ```
 
 ## Проверка
@@ -23,8 +23,6 @@ PHP → PostgreSQL connection: OK
 Database: app_db
 User: app_user
 ```
-
-Все настройки SSH, пользователей, UFW и Docker выполняются автоматически через `setup.sh`.
 
 ## Остановка
 
